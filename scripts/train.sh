@@ -13,10 +13,19 @@ DROPOUT=0.01
 # 4. train for 4 EM steps, each step using 10 chunks of data
 # 5. train for 4 EM steps, each step using 20 chunks of data
 # 6. train for 1 EM steps, each step using 40 chunks of data
-EM_SCHEDULE="\"10,1;5,2;4,5;4,10;4,20;1,40\""
+EM_SCHEDULE="10,1;5,2;4,5;4,10;4,20;1,40"
 
-CUDA_VISIBLE_DEVICES=CUDA_CORES torchrun --standalone --nproc_per_node=gpu /home/allanz/Ctrl-G/distillation/train_hmm.py \
-    --model_path /home/allanz/Ctrl-G/checkpoints/ --checkpoint 0 --save_per_step $SAVE_PER_STEP \
-    --data_path {DATA_PATH} --dataset {DATASET} --total_chunks {TOTAL_CHUNKS} --batch_size {BATCH_SIZE} \
-    --em_schedule $EM_SCHEDULE --dropout $DROPOUT --log_file $LOG_FILE_PATH
-print(cmd)
+CUDA_VISIBLE_DEVICES=1,2,3,4,5 python -m torch.distributed.run \
+  --nproc_per_node=3 \
+  /home/allanz/Ctrl-G/distillation/train_hmm.py \
+  --model_path /home/allanz/Ctrl-G/checkpoints/ \
+  --checkpoint 0 \
+  --save_per_step $SAVE_PER_STEP \
+  --data_path "NONE" \
+  --dataset "NONE" \
+  --total_chunks 100 \
+  --batch_size $BATCH_SIZE \
+  --em_schedule "$EM_SCHEDULE" \
+  --dropout $DROPOUT \
+  --log_file $LOG_FILE_PATH
+
