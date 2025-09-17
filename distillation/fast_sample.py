@@ -1,4 +1,4 @@
-#conda_env: modelmerge
+#conda_env: ctrlg
 import argparse
 import requests
 import torch
@@ -88,7 +88,7 @@ def tensorize_outputs(outputs, prompt_length, max_new_tokens, pad_value, prompt_
         for output in outputs:
             if len(output["output_ids"]) < expected_length:
                 short_sequence = torch.tensor(output["output_ids"][prompt_length:])
-                short_sequence = pad_to_len(short_sequence, max_new_tokens, pad_to_len)
+                short_sequence = pad_to_len(short_sequence, max_new_tokens, pad_value)
                 sequences.append(short_sequence) 
             else:
                 sequences.append(torch.tensor(output["output_ids"][prompt_length:]))
@@ -96,14 +96,8 @@ def tensorize_outputs(outputs, prompt_length, max_new_tokens, pad_value, prompt_
         sequences = torch.stack(sequences, dim=0)
         return None, sequences
 
-def main(batch_size, temperature, max_new_tokens, port, save_path, chunk_size, total_chunks, save_embeddings=False):
-    # use the EOS token for free generation
-    #prompts = ["<|endoftext|>" for _ in range(batch_size)]
-    #prompt_length = 1 # should be dynamic but since we're only using the EOS, we know this is 1
 
-    prompts = ["Respond ONLY in ENGLISH: <|endoftext|>" for _ in range(batch_size)]
-    prompt_length = 7 # should be dynamic but since we're only using this prompt, we know it is 7
-      
+def generate_output(temperature, max_new_tokens, save_embeddings, port, prompts):
     sampling_params = {
         "temperature": temperature,
         "top_p": 1,
@@ -118,12 +112,23 @@ def main(batch_size, temperature, max_new_tokens, port, save_path, chunk_size, t
         f"http://localhost:{port}/generate",
         json=json_data,
     )
-    prompt_hidden_state = None
-    while prompt_hidden_state is None:
-        outputs = response.json()
-        # we can also get prompt length from output[0]["meta_info"]["prompt_tokens"]
-        prompt_hidden_state = get_prompt_hidden_states(outputs, prompt_length)
+    return response.json()
 
+def main(batch_size, temperature, max_new_tokens, port, save_path, chunk_size, total_chunks, save_embeddings=False):
+    # use the EOS token for free generation
+    #prompts = ["<|endoftext|>" for _ in range(batch_size)]
+    #prompt_length = 1 # should be dynamic but since we're only using the EOS, we know this is 1
+
+    prompts = ["Respond ONLY in ENGLISH: <|endoftext|>" for _ in range(batch_size)]
+    prompt_length = 7 # should be dynamic but since we're only using this prompt, we know it is 7
+
+    prompt_hidden_state = None
+    if save_embeddings:
+        while prompt_hidden_state is None:
+            outputs = generate_output(temperature, max_new_tokens, save_embeddings, port, prompts)
+            # we can also get prompt length from output[0]["meta_info"]["prompt_tokens"]
+            prompt_hidden_state = get_prompt_hidden_states(outputs, prompt_length)
+    
     print(f"sampling {total_chunks * chunk_size} data points") 
     for chunk in range(total_chunks):
         print(f"on chunk {chunk}")
@@ -132,7 +137,7 @@ def main(batch_size, temperature, max_new_tokens, port, save_path, chunk_size, t
         sequences = []
 
         for i in range(chunk_size // batch_size):
-            outputs = response.json()
+            outputs = generate_output(temperature, max_new_tokens, save_embeddings, port, prompts)
             temp_hidden_states, temp_sequences = tensorize_outputs(outputs, prompt_length, max_new_tokens, 151645, prompt_hidden_state, save_embeddings)
             if temp_hidden_states is not None:
                 hidden_states.append(temp_hidden_states)
@@ -145,14 +150,15 @@ def main(batch_size, temperature, max_new_tokens, port, save_path, chunk_size, t
                 print(f"estimated time: {(chunk_size / (i * batch_size) * (t1 - t0) / 3600):.4f} Hours")
 
         sequences = torch.cat(sequences, dim=0)
-        hidden_states = torch.cat(hidden_states, dim=0)
+        if save_embeddings:
+            hidden_states = torch.cat(hidden_states, dim=0)
         
         print(f"saving data to {save_path}")
         if total_chunks == 0:
             torch.save(hidden_states, f"{save_path}.embeddings")
             torch.save(sequences, f"{save_path}")
         else:
-            torch.save(hidden_states, f"{save_path}.embeddings.{chunk}")
+            #torch.save(hidden_states, f"{save_path}.embeddings.{chunk}")
             torch.save(sequences, f"{save_path}.{chunk}")
 
     #print(t1 - t0) 
@@ -167,7 +173,7 @@ if __name__ == "__main__":
         "port": args.port,
         "chunk_size": args.chunk_size,
         "total_chunks": args.total_chunks,
-        "save_path": "/home/allanz/temp_Ctrl-G/hmm_data/EOS/eos.lvd",
+        "save_path": args.save_path,
         "save_embeddings": args.save_embeddings
     }
     print(sample_args)
