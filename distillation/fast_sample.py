@@ -46,18 +46,28 @@ def get_prompt_hidden_states(outputs, prompt_length):
 
     return None
 
+"""
+Traceback (most recent call last):
+  File "/home/allanz/Ctrl-G/distillation/fast_sample.py", line 180, in <module>
+    main(**sample_args)
+  File "/home/allanz/Ctrl-G/distillation/fast_sample.py", line 153, in main
+    sequences = torch.cat(sequences, dim=0)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: torch.cat(): expected a non-empty list of Tensors
+"""
+
 def tensorize_outputs(outputs, prompt_length, max_new_tokens, pad_value, prompt_hidden_state, use_hidden_states):
     hidden_states = []
     sequences = []
     expected_length = prompt_length + max_new_tokens
-    
+ 
     if use_hidden_states:
         for output in outputs:
             if len(output["output_ids"]) < expected_length:
                 short_sequence = torch.tensor(output["output_ids"][prompt_length:])
                 short_sequence = pad_to_len(short_sequence, max_new_tokens, pad_value)
                 sequences.append(short_sequence) 
-                per_step = [torch.tensor(step, dtype=torch.float32).squeeze(0) for step in output["meta_info"]["hidden_states"]]        
+                per_step = [torch.tensor(step, dtype=torch.float16).squeeze(0) for step in output["meta_info"]["hidden_states"]]        
                 per_step[0] = prompt_hidden_state
 
                 if len(per_step) < max_new_tokens:
@@ -69,7 +79,7 @@ def tensorize_outputs(outputs, prompt_length, max_new_tokens, pad_value, prompt_
 
             else:
                 sequences.append(torch.tensor(output["output_ids"][prompt_length:]))
-                per_step = [torch.tensor(step, dtype=torch.float32).squeeze(0) for step in output["meta_info"]["hidden_states"]]        
+                per_step = [torch.tensor(step, dtype=torch.float16).squeeze(0) for step in output["meta_info"]["hidden_states"]]        
                 per_step[0] = prompt_hidden_state
                 
                 if len(per_step) < max_new_tokens:
@@ -125,7 +135,8 @@ def main(batch_size, temperature, max_new_tokens, port, save_path, chunk_size, t
     prompt_hidden_state = None
     if save_embeddings:
         while prompt_hidden_state is None:
-            outputs = generate_output(temperature, max_new_tokens, save_embeddings, port, prompts)
+            outputs = generate_output(temperature, max_new_tokens, save_embeddings, port, ["Respond ONLY in ENGLISH: <|endoftext|>"] * 10)
+            print("getting prompt embeddings")
             # we can also get prompt length from output[0]["meta_info"]["prompt_tokens"]
             prompt_hidden_state = get_prompt_hidden_states(outputs, prompt_length)
     
@@ -144,7 +155,7 @@ def main(batch_size, temperature, max_new_tokens, port, save_path, chunk_size, t
             sequences.append(temp_sequences)
 
             print(f"on {i * batch_size} number of samples!")
-            if (i * batch_size) % 500 == 0 and i != 0:
+            if (i * batch_size) % 1000 == 0 and i != 0:
                 t1 = time.time()
                 print(f"time elapsed: {(t1 - t0)/3600:.4f} Hours")
                 print(f"estimated time: {(chunk_size / (i * batch_size) * (t1 - t0) / 3600):.4f} Hours")
@@ -154,11 +165,10 @@ def main(batch_size, temperature, max_new_tokens, port, save_path, chunk_size, t
             hidden_states = torch.cat(hidden_states, dim=0)
         
         print(f"saving data to {save_path}")
-        if total_chunks == 0:
+        if total_chunks == 1:
             torch.save(hidden_states, f"{save_path}.embeddings")
             torch.save(sequences, f"{save_path}")
         else:
-            #torch.save(hidden_states, f"{save_path}.embeddings.{chunk}")
             torch.save(sequences, f"{save_path}.{chunk}")
 
     #print(t1 - t0) 
